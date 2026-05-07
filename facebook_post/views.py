@@ -1,17 +1,16 @@
-from django.utils import timezone
 from adrf.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 
-from .models import ScheduledPost
 from .serializers import ScheduledPostSerializer
 from .services import (
     get_scheduled_post,
     get_all_posts,
     cancel_post,
 )
-from .tasks import publish_scheduled_post
+from .tasks import enqueue_scheduled_post
 from asgiref.sync import sync_to_async
+
 
 class SchedulePostView(APIView):
     async def post(self, request):
@@ -20,11 +19,8 @@ class SchedulePostView(APIView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        # ✅ fix — wrap sync save() with sync_to_async
         post = await sync_to_async(serializer.save)()
-
-        delay_seconds = (post.scheduled_at - timezone.now()).total_seconds()
-        publish_scheduled_post.apply_async(args=[post.id], countdown=delay_seconds)
+        await sync_to_async(enqueue_scheduled_post)(post.id)
 
         return Response(
             {

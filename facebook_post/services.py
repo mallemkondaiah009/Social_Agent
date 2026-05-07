@@ -27,7 +27,8 @@ async def mark_post_failed(post: ScheduledPost, error: dict):
 
 async def cancel_post(post: ScheduledPost):
     post.status = "cancelled"
-    await post.asave(update_fields=["status"])
+    post.celery_task_id = None
+    await post.asave(update_fields=["status", "celery_task_id"])
     
 
 
