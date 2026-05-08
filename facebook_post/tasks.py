@@ -6,8 +6,9 @@ from celery.utils.log import get_task_logger
 from django.db.models import Q
 from django.utils import timezone
 
-from .models import ScheduledPost
+from .models import ScheduledAd, ScheduledPost
 from .client import facebook_post_sync
+from .meta_ads_service import MetaAdsService, MetaAdsServiceError
 
 
 logger = get_task_logger(__name__)
@@ -27,7 +28,10 @@ def enqueue_scheduled_post(scheduled_post_id: int) -> str | None:
         return None
 
     task_id = uuid()
-    ScheduledPost.objects.filter(id=post.id, status="pending").update(celery_task_id=task_id)
+    ScheduledPost.objects.filter(id=post.id, status="pending").update(
+        celery_task_id=task_id,
+        last_celery_task_id=task_id,
+    )
     publish_scheduled_post.apply_async(args=[post.id], eta=post.scheduled_at, task_id=task_id)
     return task_id
 
@@ -64,7 +68,10 @@ def publish_due_scheduled_posts(batch_size: int = 100):
             id=post_id,
             status="pending",
             scheduled_at__lte=timezone.now(),
-        ).update(celery_task_id=task_id)
+        ).update(
+            celery_task_id=task_id,
+            last_celery_task_id=task_id,
+        )
 
         if not claimed:
             continue
@@ -126,3 +133,101 @@ def publish_scheduled_post(self, scheduled_post_id: int):
     post.save(update_fields=["status", "error", "celery_task_id", "updated_at"])
 
     return {"status": "failed", "error": result}
+
+
+@shared_task(name="social_agent.publish_due_scheduled_ads")
+def publish_due_scheduled_ads(batch_size: int = 50):
+    now = timezone.now()
+    stale_before = now - timedelta(minutes=STALE_PUBLISHING_AFTER_MINUTES)
+
+    ScheduledAd.objects.filter(
+        status="publishing",
+        updated_at__lte=stale_before,
+    ).update(status="pending", celery_task_id=None)
+
+    ad_ids = list(
+        ScheduledAd.objects.filter(
+            status="pending",
+            scheduled_at__lte=now,
+        )
+        .order_by("scheduled_at")
+        .values_list("id", flat=True)[:batch_size]
+    )
+
+    queued = 0
+    for ad_id in ad_ids:
+        task_id = uuid()
+        claimed = ScheduledAd.objects.filter(
+            id=ad_id,
+            status="pending",
+            scheduled_at__lte=timezone.now(),
+        ).update(
+            status="publishing",
+            celery_task_id=task_id,
+            last_celery_task_id=task_id,
+        )
+
+        if not claimed:
+            continue
+
+        publish_scheduled_ad.apply_async(args=[ad_id], task_id=task_id)
+        queued += 1
+
+    return {"queued": queued}
+
+
+@shared_task(
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+    name="social_agent.publish_scheduled_ad",
+)
+def publish_scheduled_ad(self, scheduled_ad_id: int):
+    task_id = self.request.id
+    try:
+        ad = ScheduledAd.objects.get(
+            id=scheduled_ad_id,
+            celery_task_id=task_id,
+            status="publishing",
+        )
+    except ScheduledAd.DoesNotExist:
+        logger.info("Skipping scheduled ad %s for task %s.", scheduled_ad_id, task_id)
+        return
+
+    if ad.scheduled_at > timezone.now():
+        ScheduledAd.objects.filter(id=ad.id, status="publishing").update(status="pending")
+        logger.info("Scheduled ad %s ran before its scheduled time.", ad.id)
+        return
+
+    try:
+        meta_ids = MetaAdsService().create_ad_stack(ad)
+    except httpx.RequestError as exc:
+        raise self.retry(exc=exc)
+    except MetaAdsServiceError as exc:
+        ad.status = "failed"
+        ad.error = str(exc)
+        ad.celery_task_id = None
+        ad.save(update_fields=["status", "error", "celery_task_id", "updated_at"])
+        return {"status": "failed", "error": str(exc)}
+
+    ad.status = "done"
+    ad.meta_campaign_id = meta_ids["meta_campaign_id"]
+    ad.meta_adset_id = meta_ids["meta_adset_id"]
+    ad.meta_creative_id = meta_ids["meta_creative_id"]
+    ad.meta_ad_id = meta_ids["meta_ad_id"]
+    ad.meta_image_hash = meta_ids["meta_image_hash"]
+    ad.celery_task_id = None
+    ad.save(
+        update_fields=[
+            "status",
+            "meta_campaign_id",
+            "meta_adset_id",
+            "meta_creative_id",
+            "meta_ad_id",
+            "meta_image_hash",
+            "celery_task_id",
+            "updated_at",
+        ]
+    )
+
+    return {"status": "done", **meta_ids}

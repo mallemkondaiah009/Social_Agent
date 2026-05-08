@@ -1,8 +1,20 @@
+from uuid import uuid4
+
 from adrf.views import APIView
+from django.conf import settings
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from rest_framework.response import Response
 from rest_framework import status
 
-from .serializers import ScheduledPostSerializer
+from .agent_service import AgentService, AgentServiceError
+from .models import ScheduledAd, ScheduledPost
+from .serializers import (
+    GenerateScheduledPostSerializer,
+    ScheduleAdSerializer,
+    ScheduledAdSerializer,
+    ScheduledPostSerializer,
+)
 from .services import (
     get_scheduled_post,
     get_all_posts,
@@ -19,13 +31,99 @@ class SchedulePostView(APIView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        post = await sync_to_async(serializer.save)()
+        post = await serializer.asave()
         await sync_to_async(enqueue_scheduled_post)(post.id)
 
         return Response(
             {
                 "message": "Post scheduled successfully.",
-                "post": ScheduledPostSerializer(post).data,
+                "post": await ScheduledPostSerializer(post).adata,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class GeneratePostView(APIView):
+    async def post(self, request):
+        serializer = GenerateScheduledPostSerializer(data=request.data)
+
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        topic = serializer.validated_data["topic"]
+        scheduled_time = serializer.validated_data["scheduled_time"]
+
+        try:
+            generated_message = await AgentService().generate_facebook_post(topic)
+        except AgentServiceError as exc:
+            return Response(
+                {"error": str(exc)},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        post = await ScheduledPost.objects.acreate(
+            message=generated_message,
+            scheduled_at=scheduled_time,
+            status="pending",
+        )
+        await sync_to_async(enqueue_scheduled_post)(post.id)
+
+        return Response(
+            {
+                "message": "Post generated and scheduled successfully.",
+                "topic": topic,
+                "generated_post": generated_message,
+                "post": await ScheduledPostSerializer(post).adata,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ScheduleAdView(APIView):
+    async def post(self, request):
+        serializer = ScheduleAdSerializer(data=request.data)
+
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        topic = serializer.validated_data["topic"]
+        scheduled_time = serializer.validated_data["scheduled_time"]
+        link_url = serializer.validated_data["link_url"]
+        daily_budget = serializer.validated_data.get(
+            "daily_budget",
+            settings.META_AD_DEFAULT_DAILY_BUDGET,
+        )
+
+        try:
+            ad_content = await AgentService().generate_facebook_ad(topic)
+        except AgentServiceError as exc:
+            return Response(
+                {"error": str(exc)},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        image_path = f"ads/generated/{uuid4()}.png"
+        saved_image_path = await sync_to_async(default_storage.save)(
+            image_path,
+            ContentFile(ad_content["image_bytes"]),
+        )
+
+        ad = await ScheduledAd.objects.acreate(
+            topic=topic,
+            primary_text=ad_content["primary_text"],
+            headline=ad_content["headline"][:255],
+            description=ad_content["description"],
+            link_url=link_url,
+            image=saved_image_path,
+            scheduled_at=scheduled_time,
+            daily_budget=daily_budget,
+            status="pending",
+        )
+
+        return Response(
+            {
+                "message": "Ad generated and scheduled successfully.",
+                "ad": await ScheduledAdSerializer(ad).adata,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -37,7 +135,7 @@ class ScheduledPostListView(APIView):
     async def get(self, request):
         posts = await get_all_posts()
         serializer = ScheduledPostSerializer(posts, many=True)
-        return Response(serializer.data)
+        return Response(await serializer.adata)
 
 
 class ScheduledPostDetailView(APIView):
@@ -50,7 +148,7 @@ class ScheduledPostDetailView(APIView):
                 {"error": "Post not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        return Response(ScheduledPostSerializer(post).data)
+        return Response(await ScheduledPostSerializer(post).adata)
 
 
 class CancelScheduledPostView(APIView):

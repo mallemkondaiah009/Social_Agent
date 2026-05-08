@@ -12,4 +12,8 @@ app.conf.beat_schedule = {
         "task": "social_agent.publish_due_scheduled_posts",
         "schedule": 60.0,
     },
+    "publish-due-scheduled-ads-every-minute": {
+        "task": "social_agent.publish_due_scheduled_ads",
+        "schedule": 60.0,
+    },
 }

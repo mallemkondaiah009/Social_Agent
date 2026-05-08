@@ -24,10 +24,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-lr_r+ct#v_7jtf(rq6^h^s*t4bnl^6^822-&5ybl!$qi81059r'
+SECRET_KEY = os.getenv("SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv("DEBUG")
 
 ALLOWED_HOSTS = []
 
@@ -121,7 +121,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Kolkata'
 
 USE_I18N = True
 
@@ -132,6 +132,8 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
 
 # Facebook credentials
 FB_PAGE_ID = os.getenv('FB_PAGE_ID')
@@ -139,6 +141,10 @@ FB_ACCESS_TOKEN = os.getenv('FB_ACCESS_TOKEN')
 FB_APP_ID=os.getenv('FB_APP_ID')
 FB_GRAPH_VERSION=os.getenv('FB_GRAPH_VERSION')
 FB_APP_SECRET=os.getenv('FB_APP_SECRET')
+META_AD_ACCOUNT_ID=os.getenv("META_AD_ACCOUNT_ID")
+META_AD_DEFAULT_DAILY_BUDGET = int(os.getenv("META_AD_DEFAULT_DAILY_BUDGET", "10000"))
+META_AD_DEFAULT_STATUS = os.getenv("META_AD_DEFAULT_STATUS", "PAUSED")
+META_AD_DEFAULT_COUNTRY = os.getenv("META_AD_DEFAULT_COUNTRY", "IN")
 
 #Redis
 REDIS_URL = os.getenv("REDIS_URL")
@@ -149,3 +155,8 @@ CELERY_BROKER_URL = f"{REDIS_URL}/0"
 CELERY_RESULT_BACKEND = f"{REDIS_URL}/1"
 CELERY_TIMEZONE = "Asia/Kolkata"
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+
+#openAI
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
+OPENAI_IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1")
