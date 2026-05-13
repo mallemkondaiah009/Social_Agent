@@ -4,7 +4,7 @@ from pathlib import Path
 import httpx
 from django.conf import settings
 
-from .models import ScheduledAd
+from ..models import ScheduledAd
 
 
 class MetaAdsServiceError(Exception):

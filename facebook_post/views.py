@@ -7,7 +7,7 @@ from django.core.files.storage import default_storage
 from rest_framework.response import Response
 from rest_framework import status
 
-from .agent_service import AgentService, AgentServiceError
+from .services.agent import AgentService, AgentServiceError
 from .models import ScheduledAd, ScheduledPost
 from .serializers import (
     GenerateScheduledPostSerializer,
@@ -15,7 +15,7 @@ from .serializers import (
     ScheduledAdSerializer,
     ScheduledPostSerializer,
 )
-from .services import (
+from .services.facebook_posts import (
     get_scheduled_post,
     get_all_posts,
     cancel_post,

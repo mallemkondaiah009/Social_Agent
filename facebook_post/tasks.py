@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from .models import ScheduledAd, ScheduledPost
 from .client import facebook_post_sync
-from .meta_ads_service import MetaAdsService, MetaAdsServiceError
+from .services.meta_ads import MetaAdsService, MetaAdsServiceError
 
 
 logger = get_task_logger(__name__)

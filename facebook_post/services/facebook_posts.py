@@ -1,5 +1,5 @@
 import logging
-from .models import ScheduledPost
+from ..models import ScheduledPost
 
 
 
@@ -34,3 +34,5 @@ async def cancel_post(post: ScheduledPost):
 
 async def get_all_posts() -> list[ScheduledPost]:
     return [post async for post in ScheduledPost.objects.all()]
+
+

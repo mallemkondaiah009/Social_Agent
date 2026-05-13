@@ -48,7 +48,7 @@ class ScheduledAd(models.Model):
     headline = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
     link_url = models.URLField()
-    image = models.FileField(upload_to="ads/", blank=True, null=True)
+    image = models.ImageField(upload_to="ads/", blank=True, null=True)
     scheduled_at = models.DateTimeField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
     daily_budget = models.PositiveIntegerField(default=10000)
