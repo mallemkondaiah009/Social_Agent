@@ -3,6 +3,7 @@ from django.db import models
 
 class ScheduledPost(models.Model):
     STATUS_CHOICES = [
+        ("generating", "Generating"),
         ("pending", "Pending"),
         ("publishing", "Publishing"),
         ("published", "Published"),
@@ -36,6 +37,7 @@ class ScheduledPost(models.Model):
 
 class ScheduledAd(models.Model):
     STATUS_CHOICES = [
+        ("generating", "Generating"),
         ("pending", "Pending"),
         ("publishing", "Publishing"),
         ("done", "Done"),

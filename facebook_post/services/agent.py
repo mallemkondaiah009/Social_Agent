@@ -3,7 +3,6 @@ import json
 from pathlib import Path
 
 import httpx
-from asgiref.sync import sync_to_async
 from django.conf import settings
 
 
@@ -14,9 +13,9 @@ class AgentServiceError(Exception):
 class AgentService:
     prompt_path = Path(settings.BASE_DIR) / "prompts" / "marketing" / "marketing-content-creator.md"
 
-    async def generate_facebook_post(self, topic: str) -> str:
-        prompt = await self._read_prompt()
-        response_data = await self._create_response(
+    def generate_facebook_post(self, topic: str) -> str:
+        prompt = self._read_prompt()
+        response_data = self._create_response(
             prompt=prompt,
             user_input=(
                 "Create one concise Facebook marketing post for this topic. "
@@ -26,9 +25,9 @@ class AgentService:
         )
         return self._extract_text(response_data)
 
-    async def generate_facebook_ad(self, topic: str) -> dict:
-        prompt = await self._read_prompt()
-        response_data = await self._create_response(
+    def generate_facebook_ad(self, topic: str) -> dict:
+        prompt = self._read_prompt()
+        response_data = self._create_response(
             prompt=prompt,
             user_input=(
                 "Create Meta/Facebook ad copy for this topic. Return strict JSON only "
@@ -38,17 +37,17 @@ class AgentService:
             ),
         )
         ad_content = self._extract_json(response_data)
-        image_bytes = await self._create_image(ad_content["image_prompt"])
+        image_bytes = self._create_image(ad_content["image_prompt"])
         ad_content["image_bytes"] = image_bytes
         return ad_content
 
-    async def _read_prompt(self) -> str:
+    def _read_prompt(self) -> str:
         try:
-            return await sync_to_async(self.prompt_path.read_text)(encoding="utf-8")
+            return self.prompt_path.read_text(encoding="utf-8")
         except OSError as exc:
             raise AgentServiceError(f"Prompt file not found: {self.prompt_path}") from exc
 
-    async def _create_response(self, prompt: str, user_input: str) -> dict:
+    def _create_response(self, prompt: str, user_input: str) -> dict:
         api_key = settings.OPENAI_API_KEY
         if not api_key:
             raise AgentServiceError("OPENAI_API_KEY is not configured.")
@@ -64,8 +63,8 @@ class AgentService:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
+            with httpx.Client(timeout=30.0) as client:
+                response = client.post(
                     "https://api.openai.com/v1/responses",
                     json=payload,
                     headers=headers,
@@ -77,7 +76,7 @@ class AgentService:
         except httpx.RequestError as exc:
             raise AgentServiceError(f"OpenAI request failed: {exc}") from exc
 
-    async def _create_image(self, prompt: str) -> bytes:
+    def _create_image(self, prompt: str) -> bytes:
         api_key = settings.OPENAI_API_KEY
         if not api_key:
             raise AgentServiceError("OPENAI_API_KEY is not configured.")
@@ -93,8 +92,8 @@ class AgentService:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.post(
+            with httpx.Client(timeout=120.0) as client:
+                response = client.post(
                     "https://api.openai.com/v1/images/generations",
                     json=payload,
                     headers=headers,
@@ -107,7 +106,7 @@ class AgentService:
                     return base64.b64decode(image_data["b64_json"])
 
                 if image_data.get("url"):
-                    image_response = await client.get(image_data["url"])
+                    image_response = client.get(image_data["url"])
                     image_response.raise_for_status()
                     return image_response.content
         except httpx.HTTPStatusError as exc:

@@ -20,8 +20,9 @@ from .services.facebook_posts import (
     get_all_posts,
     cancel_post,
 )
-from .tasks import enqueue_scheduled_post
+from .tasks import enqueue_scheduled_post, generate_scheduled_post, generate_scheduled_ad
 from asgiref.sync import sync_to_async
+from celery import uuid
 
 
 class SchedulePostView(APIView):
@@ -53,26 +54,24 @@ class GeneratePostView(APIView):
         topic = serializer.validated_data["topic"]
         scheduled_time = serializer.validated_data["scheduled_time"]
 
-        try:
-            generated_message = await AgentService().generate_facebook_post(topic)
-        except AgentServiceError as exc:
-            return Response(
-                {"error": str(exc)},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
-
+        # Create post with "generating" status
         post = await ScheduledPost.objects.acreate(
-            message=generated_message,
+            message=topic,  # Store topic temporarily, will be replaced with generated content
             scheduled_at=scheduled_time,
-            status="pending",
+            status="generating",
         )
-        await sync_to_async(enqueue_scheduled_post)(post.id)
+
+        # Trigger background generation task
+        task_id = str(uuid())
+        await sync_to_async(generate_scheduled_post.apply_async)(
+            args=[post.id],
+            task_id=task_id,
+        )
 
         return Response(
             {
-                "message": "Post generated and scheduled successfully.",
+                "message": "Post generation started in background.",
                 "topic": topic,
-                "generated_post": generated_message,
                 "post": await ScheduledPostSerializer(post).adata,
             },
             status=status.HTTP_201_CREATED,
@@ -94,35 +93,28 @@ class ScheduleAdView(APIView):
             settings.META_AD_DEFAULT_DAILY_BUDGET,
         )
 
-        try:
-            ad_content = await AgentService().generate_facebook_ad(topic)
-        except AgentServiceError as exc:
-            return Response(
-                {"error": str(exc)},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
-
-        image_path = f"ads/generated/{uuid4()}.png"
-        saved_image_path = await sync_to_async(default_storage.save)(
-            image_path,
-            ContentFile(ad_content["image_bytes"]),
-        )
-
+        # Create ad with "generating" status and placeholder values
         ad = await ScheduledAd.objects.acreate(
             topic=topic,
-            primary_text=ad_content["primary_text"],
-            headline=ad_content["headline"][:255],
-            description=ad_content["description"],
+            primary_text="Generating...",
+            headline="Generating...",
+            description="Generating...",
             link_url=link_url,
-            image=saved_image_path,
             scheduled_at=scheduled_time,
             daily_budget=daily_budget,
-            status="pending",
+            status="generating",
+        )
+
+        # Trigger background generation task
+        task_id = str(uuid())
+        await sync_to_async(generate_scheduled_ad.apply_async)(
+            args=[ad.id],
+            task_id=task_id,
         )
 
         return Response(
             {
-                "message": "Ad generated and scheduled successfully.",
+                "message": "Ad generation started in background.",
                 "ad": await ScheduledAdSerializer(ad).adata,
             },
             status=status.HTTP_201_CREATED,
