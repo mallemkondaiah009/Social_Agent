@@ -166,8 +166,17 @@ def publish_scheduled_post(self, scheduled_post_id: int):
         )
         return
 
+    # Read image bytes from storage if an image is attached
+    image_bytes: bytes | None = None
+    if post.image:
+        try:
+            with default_storage.open(post.image.name, "rb") as fh:
+                image_bytes = fh.read()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not read image for post %s: %s", post.id, exc)
+
     try:
-        status_code, result = facebook_post_sync(post.message, post.link)
+        status_code, result = facebook_post_sync(post.message, post.link, image_bytes)
     except (httpx.TimeoutException, httpx.RequestError) as exc:
         raise self.retry(exc=exc)
 
@@ -176,16 +185,13 @@ def publish_scheduled_post(self, scheduled_post_id: int):
         post.fb_post_id = result.get("id")
         post.celery_task_id = None
         post.save(update_fields=["status", "fb_post_id", "celery_task_id", "updated_at"])
-
         return {"status": "published", "fb_post_id": post.fb_post_id}
 
     post.status = "failed"
     post.error = str(result)
     post.celery_task_id = None
     post.save(update_fields=["status", "error", "celery_task_id", "updated_at"])
-
     return {"status": "failed", "error": result}
-
 
 # NEW: Generate ad text and image
 @shared_task(
