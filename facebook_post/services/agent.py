@@ -14,6 +14,7 @@ class AgentService:
     prompt_path = Path(settings.BASE_DIR) / "prompts" / "marketing" / "marketing-content-creator.md"
 
     def generate_facebook_post(self, topic: str) -> str:
+        """Generate only post text."""
         prompt = self._read_prompt()
         response_data = self._create_response(
             prompt=prompt,
@@ -24,6 +25,23 @@ class AgentService:
             ),
         )
         return self._extract_text(response_data)
+
+    def generate_facebook_post_with_image(self, topic: str) -> dict:
+        """Generate post text AND image."""
+        prompt = self._read_prompt()
+        response_data = self._create_response(
+            prompt=prompt,
+            user_input=(
+                "Create Meta/Facebook post content for this topic. Return strict JSON only "
+                "with keys: post_text, image_prompt. "
+                "The image_prompt should describe an engaging post image.\n\n"
+                f"Topic: {topic}"
+            ),
+        )
+        post_content = self._extract_json(response_data)
+        image_bytes = self._create_image(post_content["image_prompt"])
+        post_content["image_bytes"] = image_bytes
+        return post_content
 
     def generate_facebook_ad(self, topic: str) -> dict:
         prompt = self._read_prompt()
@@ -141,11 +159,6 @@ class AgentService:
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError as exc:
-            raise AgentServiceError("OpenAI response did not include valid ad JSON.") from exc
-
-        required_fields = ["primary_text", "headline", "description", "image_prompt"]
-        missing_fields = [field for field in required_fields if not parsed.get(field)]
-        if missing_fields:
-            raise AgentServiceError(f"OpenAI ad JSON missing fields: {', '.join(missing_fields)}")
+            raise AgentServiceError("OpenAI response did not include valid JSON.") from exc
 
         return parsed

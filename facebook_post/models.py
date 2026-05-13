@@ -12,6 +12,7 @@ class ScheduledPost(models.Model):
     ]
 
     message = models.TextField()
+    image = models.ImageField(upload_to="posts/", blank=True, null=True)  # NEW
     link = models.URLField(blank=True, null=True)
     scheduled_at = models.DateTimeField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")

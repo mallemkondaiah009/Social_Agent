@@ -11,8 +11,8 @@ from django.utils import timezone
 
 from .models import ScheduledAd, ScheduledPost
 from .client import facebook_post_sync
-from .services.meta_ads import MetaAdsService, MetaAdsServiceError
 from .services.agent import AgentService, AgentServiceError
+from .services.meta_ads import MetaAdsService, MetaAdsServiceError
 
 
 logger = get_task_logger(__name__)
@@ -40,75 +40,52 @@ def enqueue_scheduled_post(scheduled_post_id: int) -> str | None:
     return task_id
 
 
-@shared_task(name="social_agent.generate_scheduled_post", bind=True, max_retries=3)
+# NEW: Generate post text and image
+@shared_task(
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+    name="social_agent.generate_scheduled_post",
+)
 def generate_scheduled_post(self, scheduled_post_id: int):
-    """Generate Facebook post content in background."""
+    """Generate post text (and optionally image) in background."""
     try:
         post = ScheduledPost.objects.get(id=scheduled_post_id, status="generating")
     except ScheduledPost.DoesNotExist:
-        logger.warning("Scheduled post %s does not exist or is not in generating status.", scheduled_post_id)
-        return
+        logger.warning("Scheduled post %s does not exist or not in generating status.", scheduled_post_id)
+        return {"status": "failed", "error": "Post not found"}
 
     try:
-        generated_message = AgentService().generate_facebook_post(post.message)
-        
-        post.message = generated_message
+        # Generate post with image
+        post_content = AgentService().generate_facebook_post_with_image(post.message)
+
+        # Save image
+        image_path = f"posts/generated/{uuid4()}.png"
+        saved_image_path = default_storage.save(
+            image_path,
+            ContentFile(post_content["image_bytes"]),
+        )
+
+        # Update post
+        post.message = post_content["post_text"]
+        post.image = saved_image_path
         post.status = "pending"
-        post.save(update_fields=["message", "status", "updated_at"])
-        
+        post.save(update_fields=["message", "image", "status", "updated_at"])
+
+        # Enqueue for publishing
+        enqueue_scheduled_post(post.id)
+
         logger.info("Post %s generated successfully.", post.id)
         return {"status": "generated", "post_id": post.id}
-        
+
     except AgentServiceError as exc:
-        logger.error("Failed to generate post %s: %s", scheduled_post_id, str(exc))
         post.status = "failed"
         post.error = str(exc)
         post.save(update_fields=["status", "error", "updated_at"])
+        logger.error("Failed to generate post %s: %s", post.id, str(exc))
         return {"status": "failed", "error": str(exc)}
     except Exception as exc:
-        logger.error("Unexpected error generating post %s: %s", scheduled_post_id, str(exc))
-        raise self.retry(exc=exc, countdown=60)
-
-
-@shared_task(name="social_agent.generate_scheduled_ad", bind=True, max_retries=3)
-def generate_scheduled_ad(self, scheduled_ad_id: int):
-    """Generate Facebook ad content and image in background."""
-    try:
-        ad = ScheduledAd.objects.get(id=scheduled_ad_id, status="generating")
-    except ScheduledAd.DoesNotExist:
-        logger.warning("Scheduled ad %s does not exist or is not in generating status.", scheduled_ad_id)
-        return
-
-    try:
-        ad_content = AgentService().generate_facebook_ad(ad.topic)
-        
-        # Save image
-        image_path = f"ads/generated/{uuid4()}.png"
-        saved_image_path = default_storage.save(
-            image_path,
-            ContentFile(ad_content["image_bytes"]),
-        )
-        
-        # Update ad with generated content
-        ad.primary_text = ad_content["primary_text"]
-        ad.headline = ad_content["headline"][:255]
-        ad.description = ad_content["description"]
-        ad.image = saved_image_path
-        ad.status = "pending"
-        ad.save(update_fields=["primary_text", "headline", "description", "image", "status", "updated_at"])
-        
-        logger.info("Ad %s generated successfully.", ad.id)
-        return {"status": "generated", "ad_id": ad.id}
-        
-    except AgentServiceError as exc:
-        logger.error("Failed to generate ad %s: %s", scheduled_ad_id, str(exc))
-        ad.status = "failed"
-        ad.error = str(exc)
-        ad.save(update_fields=["status", "error", "updated_at"])
-        return {"status": "failed", "error": str(exc)}
-    except Exception as exc:
-        logger.error("Unexpected error generating ad %s: %s", scheduled_ad_id, str(exc))
-        raise self.retry(exc=exc, countdown=60)
+        raise self.retry(exc=exc)
 
 
 @shared_task(name="social_agent.publish_due_scheduled_posts")
@@ -208,6 +185,53 @@ def publish_scheduled_post(self, scheduled_post_id: int):
     post.save(update_fields=["status", "error", "celery_task_id", "updated_at"])
 
     return {"status": "failed", "error": result}
+
+
+# NEW: Generate ad text and image
+@shared_task(
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+    name="social_agent.generate_scheduled_ad",
+)
+def generate_scheduled_ad(self, scheduled_ad_id: int):
+    """Generate ad copy and image in background."""
+    try:
+        ad = ScheduledAd.objects.get(id=scheduled_ad_id, status="generating")
+    except ScheduledAd.DoesNotExist:
+        logger.warning("Scheduled ad %s does not exist or not in generating status.", scheduled_ad_id)
+        return {"status": "failed", "error": "Ad not found"}
+
+    try:
+        # Generate ad content
+        ad_content = AgentService().generate_facebook_ad(ad.topic)
+
+        # Save image
+        image_path = f"ads/generated/{uuid4()}.png"
+        saved_image_path = default_storage.save(
+            image_path,
+            ContentFile(ad_content["image_bytes"]),
+        )
+
+        # Update ad
+        ad.primary_text = ad_content["primary_text"]
+        ad.headline = ad_content["headline"][:255]
+        ad.description = ad_content["description"]
+        ad.image = saved_image_path
+        ad.status = "pending"
+        ad.save(update_fields=["primary_text", "headline", "description", "image", "status", "updated_at"])
+
+        logger.info("Ad %s generated successfully.", ad.id)
+        return {"status": "generated", "ad_id": ad.id}
+
+    except AgentServiceError as exc:
+        ad.status = "failed"
+        ad.error = str(exc)
+        ad.save(update_fields=["status", "error", "updated_at"])
+        logger.error("Failed to generate ad %s: %s", ad.id, str(exc))
+        return {"status": "failed", "error": str(exc)}
+    except Exception as exc:
+        raise self.retry(exc=exc)
 
 
 @shared_task(name="social_agent.publish_due_scheduled_ads")

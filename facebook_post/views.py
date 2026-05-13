@@ -6,6 +6,7 @@ from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from rest_framework.response import Response
 from rest_framework import status
+from celery import uuid as celery_uuid
 
 from .services.agent import AgentService, AgentServiceError
 from .models import ScheduledAd, ScheduledPost
@@ -22,7 +23,6 @@ from .services.facebook_posts import (
 )
 from .tasks import enqueue_scheduled_post, generate_scheduled_post, generate_scheduled_ad
 from asgiref.sync import sync_to_async
-from celery import uuid
 
 
 class SchedulePostView(APIView):
@@ -44,6 +44,7 @@ class SchedulePostView(APIView):
         )
 
 
+# NEW: Generate post with text + image
 class GeneratePostView(APIView):
     async def post(self, request):
         serializer = GenerateScheduledPostSerializer(data=request.data)
@@ -53,26 +54,25 @@ class GeneratePostView(APIView):
 
         topic = serializer.validated_data["topic"]
         scheduled_time = serializer.validated_data["scheduled_time"]
+        include_image = serializer.validated_data.get("include_image", True)
 
         # Create post with "generating" status
         post = await ScheduledPost.objects.acreate(
-            message=topic,  # Store topic temporarily, will be replaced with generated content
+            message=topic,  # Store topic temporarily
             scheduled_at=scheduled_time,
             status="generating",
         )
 
         # Trigger background generation task
-        task_id = str(uuid())
-        await sync_to_async(generate_scheduled_post.apply_async)(
-            args=[post.id],
-            task_id=task_id,
-        )
+        task_id = celery_uuid()
+        generate_scheduled_post.apply_async(args=[post.id], task_id=task_id)
 
         return Response(
             {
                 "message": "Post generation started in background.",
-                "topic": topic,
-                "post": await ScheduledPostSerializer(post).adata,
+                "status": "generating",
+                "post_id": post.id,
+                "created_at": post.created_at,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -93,12 +93,12 @@ class ScheduleAdView(APIView):
             settings.META_AD_DEFAULT_DAILY_BUDGET,
         )
 
-        # Create ad with "generating" status and placeholder values
+        # Create ad with "generating" status
         ad = await ScheduledAd.objects.acreate(
             topic=topic,
-            primary_text="Generating...",
-            headline="Generating...",
-            description="Generating...",
+            primary_text="",  # Will be filled during generation
+            headline="",
+            description="",
             link_url=link_url,
             scheduled_at=scheduled_time,
             daily_budget=daily_budget,
@@ -106,16 +106,15 @@ class ScheduleAdView(APIView):
         )
 
         # Trigger background generation task
-        task_id = str(uuid())
-        await sync_to_async(generate_scheduled_ad.apply_async)(
-            args=[ad.id],
-            task_id=task_id,
-        )
+        task_id = celery_uuid()
+        generate_scheduled_ad.apply_async(args=[ad.id], task_id=task_id)
 
         return Response(
             {
                 "message": "Ad generation started in background.",
-                "ad": await ScheduledAdSerializer(ad).adata,
+                "status": "generating",
+                "ad_id": ad.id,
+                "created_at": ad.created_at,
             },
             status=status.HTTP_201_CREATED,
         )

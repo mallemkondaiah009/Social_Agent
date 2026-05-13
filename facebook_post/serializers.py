@@ -11,6 +11,7 @@ class ScheduledPostSerializer(ModelSerializer):
         fields = [
             "id",
             "message",
+            "image",
             "link",
             "scheduled_at",
             "status",
@@ -18,7 +19,7 @@ class ScheduledPostSerializer(ModelSerializer):
             "error",
             "created_at",
         ]
-        read_only_fields = ["status", "fb_post_id", "error", "created_at"]
+        read_only_fields = ["status", "image", "fb_post_id", "error", "created_at"]
 
     def validate_scheduled_at(self, value):
         if value <= timezone.now():
@@ -29,6 +30,7 @@ class ScheduledPostSerializer(ModelSerializer):
 class GenerateScheduledPostSerializer(Serializer):
     topic = serializers.CharField(max_length=255)
     scheduled_time = serializers.DateTimeField(input_formats=["%Y-%m-%d %H:%M", "iso-8601"])
+    include_image = serializers.BooleanField(default=True)  # NEW
 
     def validate_scheduled_time(self, value):
         if timezone.is_naive(value):
