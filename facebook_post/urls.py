@@ -9,10 +9,10 @@ from .views import (
 )
 
 urlpatterns = [
-    path("meta/ads/schedule/", ScheduleAdView.as_view()),
-    path("facebook/posts/schedule/", GeneratePostView.as_view()),
-    path("facebook/schedule/", SchedulePostView.as_view()),
-    path("facebook/schedule/list/", ScheduledPostListView.as_view()),
-    path("facebook/schedule/<int:post_id>/", ScheduledPostDetailView.as_view()),
-    path("facebook/schedule/<int:post_id>/cancel/", CancelScheduledPostView.as_view()),
+    path("meta/ads/generate-schedule/", ScheduleAdView.as_view()),
+    path("facebook/posts/generate-schedule/", GeneratePostView.as_view()),
+    path("facebook/normal-schedule/", SchedulePostView.as_view()),
+    path("facebook/scheduled-posts/list/", ScheduledPostListView.as_view()),
+    path("facebook/scheduled-post/<int:post_id>/", ScheduledPostDetailView.as_view()),
+    path("facebook/scheduled-post/<int:post_id>/cancel/", CancelScheduledPostView.as_view()),
 ]
